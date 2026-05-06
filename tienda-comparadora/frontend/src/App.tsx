@@ -3,6 +3,7 @@
 
 import { useState, useCallback } from 'react'
 import type { Product, ActiveFilters, SearchResponse } from './types'
+import { CategoryNav } from './components/CategoryNav'
 
 // ─── Datos mock locales (mientras el backend no esté corriendo) ────────────
 const MOCK_RESULTS: Product[] = [
@@ -272,16 +273,20 @@ export default function App() {
 
   const PROVIDERS = ['amazon', 'ebay', 'walmart', 'china']
 
-  const handleSearch = useCallback(async () => {
-    if (!query.trim()) return
+  const handleSearch = useCallback(async (externalQuery?: string) => {
+    const q = externalQuery ?? query
+    if (!q.trim()) return
+
+    // Si viene query externo, actualizar el input también
+    if (externalQuery) setQuery(externalQuery)
+
     setLoading(true)
     setSearched(true)
 
-    // Simular delay de red + usar mock data
     await new Promise(r => setTimeout(r, 700))
-    const q = query.toLowerCase()
+    const qLower = q.toLowerCase()
     const filtered = MOCK_RESULTS.filter(p =>
-      p.title.toLowerCase().includes(q) &&
+      p.title.toLowerCase().includes(qLower) &&
       (selectedProviders.length === 0 || selectedProviders.includes(p.provider))
     )
     setResults(filtered)
@@ -338,6 +343,8 @@ export default function App() {
           <span style={{ cursor: 'pointer' }}>Historial</span>
         </nav>
       </header>
+
+      <CategoryNav onCategorySelect={(q) => handleSearch(q)} />
 
       {/* ── HERO / SEARCH ── */}
       <div style={{
