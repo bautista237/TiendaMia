@@ -4,6 +4,7 @@
 import { useState, useCallback } from 'react'
 import type { Product, ActiveFilters, SearchResponse } from './types'
 import { CategoryNav } from './components/CategoryNav'
+import { FilterPanel } from './components/FilterPanel'
 
 // ─── Datos mock locales (mientras el backend no esté corriendo) ────────────
 const MOCK_RESULTS: Product[] = [
@@ -270,28 +271,80 @@ export default function App() {
   const [showCompare, setShowCompare] = useState(false)
   const [sortBy, setSortBy] = useState<'price_asc' | 'price_desc' | 'rating'>('price_asc')
   const [filters, setFilters] = useState<ActiveFilters>({})
+  const [activeCategory, setActiveCategory] = useState<string | null>(null)
+  const [activeCategoryLabel, setActiveCategoryLabel] = useState<string | null>(null)
 
   const PROVIDERS = ['amazon', 'ebay', 'walmart', 'china']
 
-  const handleSearch = useCallback(async (externalQuery?: string) => {
-    const q = externalQuery ?? query
-    if (!q.trim()) return
+  const handleSearch = useCallback(async (opts?: { text?: string; category?: string; categoryLabel?: string }) => {
+    const searchText = opts?.text ?? query
+    const searchCategory = opts?.category !== undefined ? opts.category : activeCategory
 
-    // Si viene query externo, actualizar el input también
-    if (externalQuery) setQuery(externalQuery)
+    // Si viene categoría nueva, actualizarla en el estado
+    if (opts?.category !== undefined) {
+      setActiveCategory(opts.category || null)
+      setActiveCategoryLabel(opts?.categoryLabel || null)
+    }
+
+    // Si viene texto nuevo, actualizarlo en el input
+    if (opts?.text !== undefined) {
+      setQuery(opts.text)
+    }
+
+    // Necesitamos al menos texto o categoría para buscar
+    if (!searchText.trim() && !searchCategory) return
 
     setLoading(true)
     setSearched(true)
 
-    await new Promise(r => setTimeout(r, 700))
-    const qLower = q.toLowerCase()
-    const filtered = MOCK_RESULTS.filter(p =>
-      p.title.toLowerCase().includes(qLower) &&
-      (selectedProviders.length === 0 || selectedProviders.includes(p.provider))
-    )
+    await new Promise(r => setTimeout(r, 500))
+
+    const textLower = searchText.toLowerCase()
+
+    const filtered = MOCK_RESULTS.filter(p => {
+      // Filtro de texto (si hay texto)
+      const matchesText = !searchText.trim() ||
+        p.title.toLowerCase().includes(textLower) ||
+        (p.category || '').toLowerCase().includes(textLower)
+
+      // Filtro de categoría (si hay categoría activa)
+      // Busca en el título y la categoría del producto
+      const matchesCategory = !searchCategory ||
+        p.title.toLowerCase().includes(searchCategory.toLowerCase()) ||
+        (p.category || '').toLowerCase().includes(searchCategory.toLowerCase())
+
+      // Filtro de provider
+      const matchesProvider = selectedProviders.length === 0 ||
+        selectedProviders.includes(p.provider)
+
+      // Filtro de precio
+      const matchesPrice = !filters.price ||
+        (p.price >= (filters.price.min ?? 0) && p.price <= (filters.price.max ?? 99999))
+
+      // Filtro de rating
+      const matchesRating = !filters.rating ||
+        (p.rating ?? 0) >= filters.rating.min
+
+      // Filtro de peso
+      const matchesWeight = !filters.weight || !p.weight ||
+        p.weight.value <= filters.weight.max_kg
+
+      // Filtro de stock
+      const matchesStock = !filters.in_stock?.only || p.in_stock
+
+      return matchesText && matchesCategory && matchesProvider &&
+             matchesPrice && matchesRating && matchesWeight && matchesStock
+    })
+
     setResults(filtered)
     setLoading(false)
-  }, [query, selectedProviders])
+  }, [query, activeCategory, selectedProviders, filters])
+
+  const handleFiltersChange = (newFilters: ActiveFilters) => {
+    setFilters(newFilters)
+    // Re-ejecutar búsqueda con nuevos filtros
+    handleSearch({ text: query })
+  }
 
   const toggleProvider = (name: string) => {
     setSelectedProviders(prev =>
@@ -344,7 +397,12 @@ export default function App() {
         </nav>
       </header>
 
-      <CategoryNav onCategorySelect={(q) => handleSearch(q)} />
+      <CategoryNav
+        activeCategory={activeCategory}
+        onCategorySelect={(categoryQuery, categoryLabel) =>
+          handleSearch({ category: categoryQuery, categoryLabel })
+        }
+      />
 
       {/* ── HERO / SEARCH ── */}
       <div style={{
@@ -372,7 +430,7 @@ export default function App() {
           <input
             value={query}
             onChange={e => setQuery(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleSearch()}
+            onKeyDown={e => e.key === 'Enter' && handleSearch({ text: query })}
             placeholder="Buscá cualquier producto..."
             style={{
               flex: 1, padding: '14px 20px', fontSize: 15,
@@ -381,7 +439,7 @@ export default function App() {
             }}
           />
           <button
-            onClick={handleSearch}
+            onClick={() => handleSearch({ text: query })}
             disabled={loading}
             style={{
               padding: '14px 28px', background: '#00ff94', color: '#000',
@@ -420,71 +478,100 @@ export default function App() {
             </button>
           )}
         </div>
+
+        {activeCategory && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
+            <span style={{ fontSize: 12, color: '#555' }}>Categoría:</span>
+            <span style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              background: '#1a1a2e', color: '#00ff94',
+              fontSize: 12, fontWeight: 700, padding: '4px 12px', borderRadius: 20,
+              border: '1px solid #00ff9440',
+            }}>
+              {activeCategoryLabel}
+              <button
+                onClick={() => {
+                  setActiveCategory(null)
+                  setActiveCategoryLabel(null)
+                  if (query.trim()) handleSearch({ category: '' })
+                }}
+                style={{
+                  background: 'none', border: 'none', color: '#00ff94',
+                  cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: 0,
+                }}
+              >×</button>
+            </span>
+          </div>
+        )}
       </div>
 
       {/* ── RESULTADOS ── */}
       {searched && (
-        <div style={{ maxWidth: 1200, margin: '0 auto', padding: '24px 32px 60px' }}>
+        <div style={{ maxWidth: 1400, margin: '0 auto', padding: '24px 32px 60px', display: 'flex', gap: 24, alignItems: 'flex-start' }}>
 
-          {/* barra de resultados */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-            <span style={{ color: '#555', fontSize: 13 }}>
-              {loading ? 'Buscando...' : `${sorted.length} resultado${sorted.length !== 1 ? 's' : ''}`}
-            </span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              {/* comparar */}
-              {compareList.length >= 2 && (
-                <button onClick={() => setShowCompare(true)} style={{
-                  padding: '7px 16px', background: '#00ff94', color: '#000',
-                  border: 'none', borderRadius: 8, fontWeight: 800, fontSize: 12, cursor: 'pointer',
-                }}>
-                  COMPARAR ({compareList.length})
-                </button>
-              )}
-              {compareList.length === 1 && (
-                <span style={{ fontSize: 12, color: '#555' }}>Seleccioná otro para comparar</span>
-              )}
-              {/* sort */}
-              <select
-                value={sortBy}
-                onChange={e => setSortBy(e.target.value as typeof sortBy)}
-                style={{
-                  background: '#111118', border: '1px solid #222', color: '#888',
-                  padding: '7px 12px', borderRadius: 8, fontSize: 12, cursor: 'pointer',
-                }}
-              >
-                <option value="price_asc">Precio: menor primero</option>
-                <option value="price_desc">Precio: mayor primero</option>
-                <option value="rating">Mejor calificados</option>
-              </select>
+          <FilterPanel filters={filters} onFiltersChange={handleFiltersChange} />
+
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {/* barra de resultados */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+              <span style={{ color: '#555', fontSize: 13 }}>
+                {loading ? 'Buscando...' : `${sorted.length} resultado${sorted.length !== 1 ? 's' : ''}`}
+              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                {/* comparar */}
+                {compareList.length >= 2 && (
+                  <button onClick={() => setShowCompare(true)} style={{
+                    padding: '7px 16px', background: '#00ff94', color: '#000',
+                    border: 'none', borderRadius: 8, fontWeight: 800, fontSize: 12, cursor: 'pointer',
+                  }}>
+                    COMPARAR ({compareList.length})
+                  </button>
+                )}
+                {compareList.length === 1 && (
+                  <span style={{ fontSize: 12, color: '#555' }}>Seleccioná otro para comparar</span>
+                )}
+                {/* sort */}
+                <select
+                  value={sortBy}
+                  onChange={e => setSortBy(e.target.value as typeof sortBy)}
+                  style={{
+                    background: '#111118', border: '1px solid #222', color: '#888',
+                    padding: '7px 12px', borderRadius: 8, fontSize: 12, cursor: 'pointer',
+                  }}
+                >
+                  <option value="price_asc">Precio: menor primero</option>
+                  <option value="price_desc">Precio: mayor primero</option>
+                  <option value="rating">Mejor calificados</option>
+                </select>
+              </div>
             </div>
+
+            {/* grilla */}
+            {loading ? (
+              <div style={{ textAlign: 'center', padding: '80px 0', color: '#333', fontSize: 14 }}>
+                Buscando en todos los providers...
+              </div>
+            ) : sorted.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '80px 0', color: '#333', fontSize: 14 }}>
+                Sin resultados para "{query}". Probá con otra búsqueda.
+              </div>
+            ) : (
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
+                gap: 16,
+              }}>
+                {sorted.map(product => (
+                  <ProductCard
+                    key={product.id}
+                    product={product}
+                    selected={!!compareList.find(p => p.id === product.id)}
+                    onSelect={toggleCompare}
+                  />
+                ))}
+              </div>
+            )}
           </div>
-
-          {/* grilla */}
-          {loading ? (
-            <div style={{ textAlign: 'center', padding: '80px 0', color: '#333', fontSize: 14 }}>
-              Buscando en todos los providers...
-            </div>
-          ) : sorted.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '80px 0', color: '#333', fontSize: 14 }}>
-              Sin resultados para "{query}". Probá con otra búsqueda.
-            </div>
-          ) : (
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
-              gap: 16,
-            }}>
-              {sorted.map(product => (
-                <ProductCard
-                  key={product.id}
-                  product={product}
-                  selected={!!compareList.find(p => p.id === product.id)}
-                  onSelect={toggleCompare}
-                />
-              ))}
-            </div>
-          )}
         </div>
       )}
 
